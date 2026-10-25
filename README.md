@@ -20,4 +20,4 @@ pytest
 Logs contain file contents and command output. Process locally, never commit real logs, and keep redaction on in reports.
 
 ## Status
-M0 (schema discovery) is next. Run the `session-log-parsing` skill to probe real logs and write `docs/schema-notes.md`.
+M0 (schema discovery) and M1 (parser: `src/parse.py`) are done. Run `python src/parse.py` to write tables to `data/`. M2 (token attribution) is next.

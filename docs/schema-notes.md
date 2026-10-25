@@ -48,3 +48,22 @@ Across 162 distinct message IDs, 111 appear in 2 to 5 records. `usage` is **iden
 - No compaction events, subagent sidechains, or Edit calls in this sample; get a longer session or find one to capture those schemas.
 - Confirm whether `cost-state` is per-session or cumulative.
 - `ccusage` is not yet installed for cross-checking.
+
+## M1 validation results (2026-10-25)
+Parser (`src/parse.py`) on all 6 real sessions: 1,764 records, 0 skipped lines, 0 unknown types, 169 usage rows, 154 tool calls (all matched to a result).
+
+Deduped usage compared with the last `cost-state` per session (`parse.validate_usage`):
+| field | parsed vs cost-state |
+|---|---|
+| output_tokens (sonnet) | 1% to 4% lower |
+| cache_creation (sonnet) | 2% to 4% lower |
+| cache_read (sonnet) | 15% to 25% lower |
+| input_tokens (sonnet) | 97% lower (e.g. 114 vs 4,210) |
+| haiku (all fields) | 0 parsed; ~1,170 input / ~15 output per session in cost-state |
+
+Diagnosis:
+- Not a partial-stream artifact: no usage row has near-zero `output_tokens`, and `requestId` maps 1:1 to `message.id`.
+- The logs omit some API calls that `cost-state` counts (haiku helper calls, and other unlogged calls). Several sessions have more `api-request` records than logged assistant messages (e.g. 77 vs 70).
+- **Consequence:** log-derived totals are a lower bound on billed usage. Per-action attribution is still sound; absolute totals should be labelled "logged usage" and shown beside `cost-state` where available.
+- One `message.id` appears in two sessions (170 distinct IDs, 169 rows). Dedupe is global across files, so it counts once.
+- `ccusage` is not installed, so the independent check is still outstanding.
