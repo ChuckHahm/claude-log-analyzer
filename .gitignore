@@ -4,3 +4,4 @@ config/patterns.yaml
 *.jsonl
 __pycache__/
 .venv/
+*.egg-info/
