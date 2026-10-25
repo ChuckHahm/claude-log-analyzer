@@ -1,0 +1,6 @@
+data/
+reports/
+config/patterns.yaml
+*.jsonl
+__pycache__/
+.venv/
