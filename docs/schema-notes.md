@@ -2,7 +2,7 @@
 
 Probed 2026-10-25: 6 sessions, 1,691 records, 17 project dirs under `~/.claude/projects/` (only 4 have logs), dates 2026-10-22 to 2026-10-25.
 Claude Code versions seen: 2.1.294, 2.1.308, 2.1.309, 2.1.310. Model in all assistant records: `claude-sonnet-5-5`.
-`deleteSessionsAfterDays` is not set in `~/.claude/settings.json`, so the 30-day default applies.
+`cleanupPeriodDays` was not set at probe time (30-day default); raised to 365 on 2026-10-25.
 Observed on these versions only; re-probe after upgrades.
 
 ## Record types (`.type`)

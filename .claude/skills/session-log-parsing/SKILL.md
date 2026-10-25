@@ -7,7 +7,7 @@ description: Inspect and parse Claude Code session logs (JSONL files under ~/.cl
 
 ## Locations
 - `~/.claude/projects/<project-dir>/<session-id>.jsonl`; the project dir is the working path with slashes turned into dashes.
-- Retention defaults to 30 days; check `~/.claude/settings.json` for `deleteSessionsAfterDays`.
+- Retention defaults to 30 days; check `~/.claude/settings.json` for `cleanupPeriodDays`.
 
 ## Step 1: Probe the schema (always do this first)
 Field names vary by version. Never hardcode without checking.

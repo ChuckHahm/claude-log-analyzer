@@ -10,7 +10,7 @@ Build a local tool that reads Claude Code session logs (`~/.claude/projects/<pro
 ## Background and constraints (from the originating discussion)
 - Logs are JSONL, one record per event: user messages, assistant messages, `tool_use` and `tool_result` blocks, timestamps, model, token usage (input, output, cache creation, cache read).
 - Records link via fields like `uuid` / `parentUuid`; subagent work may be flagged (e.g. `isSidechain`). **Field names vary by Claude Code version. Always inspect real records before coding against a schema.**
-- Logs are deleted after 30 days by default. Set `"deleteSessionsAfterDays"` in `~/.claude/settings.json` to retain them.
+- Logs are deleted after 30 days by default. Set `"cleanupPeriodDays"` in `~/.claude/settings.json` to retain them.
 - A streamed assistant response may span several records. **Dedupe by message ID** before summing usage or you will double-count.
 - Per-tool-result token counts are not logged. Estimate from text length, or infer from the input-token delta on the following turn.
 - Logs are NOT a complete record of API traffic. They omit the system prompt, full tool schemas, auto-loaded context, hook/permission details, and telemetry. For wire-level truth use a logging proxy via `ANTHROPIC_BASE_URL`.
@@ -68,7 +68,7 @@ Stack: Python 3.11+, pandas, `jq` for ad-hoc inspection. Optional: matplotlib fo
 | Schema changes between versions | Probe first; version-tolerant parsing; fixtures per version |
 | Double-counted usage | Dedupe on message ID; validate against `ccusage` |
 | Sensitive data leaking into reports | Redaction on by default; reports truncate matches |
-| Logs deleted before analysis | Raise `deleteSessionsAfterDays`; optionally copy logs to a private archive |
+| Logs deleted before analysis | Raise `cleanupPeriodDays`; optionally copy logs to a private archive |
 
 ## Open questions
 - Which Claude Code versions are present in the existing logs?
