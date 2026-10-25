@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Log Analyzer</title>
+<style>
+  :root { --bg:#f7f7f5; --panel:#fff; --text:#1f2328; --muted:#656d76; --line:#d8dce0; --accent:#2f6fdb;
+          --warn:#b36b00; --alert:#c62828; --ok:#2e7d32; --bar:#2f6fdb; --bar2:#8aa9e6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14161a; --panel:#1c1f24; --text:#e6e8ea; --muted:#9aa3ad; --line:#2d3239; --accent:#6ea0ff;
+            --warn:#e0a040; --alert:#ff6b6b; --ok:#6fcf7a; --bar:#6ea0ff; --bar2:#3b5a99; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; }
+  header { display:flex; flex-wrap:wrap; gap:12px 20px; align-items:center; padding:12px 20px;
+           background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+  h1 { font-size:16px; margin:0 8px 0 0; }
+  label { display:flex; flex-direction:column; font-size:11px; color:var(--muted); gap:2px; }
+  select, button { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px;
+                   background:var(--panel); color:var(--text); }
+  select { min-width:220px; max-width:420px; }
+  button { cursor:pointer; } button:hover { border-color:var(--accent); }
+  .spacer { flex:1; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:10px; border:1px solid var(--line); color:var(--muted); }
+  nav { display:flex; gap:4px; padding:10px 20px 0; flex-wrap:wrap; }
+  nav button { border-radius:6px 6px 0 0; border-bottom:none; }
+  nav button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  main { padding:16px 20px 40px; max-width:1200px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:10px; margin-bottom:16px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .card .v { font-size:20px; font-weight:600; } .card .k { font-size:11px; color:var(--muted); }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:14px; }
+  .panel h2 { font-size:13px; margin:0 0 8px; }
+  .insight { border-left:4px solid var(--muted); padding:6px 10px; margin:8px 0; background:var(--bg); border-radius:0 6px 6px 0; }
+  .insight.warn { border-color:var(--warn); } .insight.alert { border-color:var(--alert); } .insight.info { border-color:var(--accent); }
+  .insight b { display:block; } .insight small { color:var(--muted); display:block; }
+  .insight .act { color:var(--ok); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:11px; }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; }
+  td.t { word-break:break-all; font-family:ui-monospace, monospace; font-size:12px; }
+  .bar { height:8px; background:var(--bar); border-radius:4px; min-width:1px; }
+  .muted { color:var(--muted); } .tag { font-size:11px; padding:1px 6px; border-radius:4px; background:var(--bg); border:1px solid var(--line); }
+  .tag.user { color:var(--accent); } .tag.assistant { color:var(--ok); }
+  .caveat { font-size:12px; color:var(--muted); margin-top:8px; }
+  svg text { fill:var(--muted); font-size:10px; }
+  #err { color:var(--alert); padding:8px 20px; }
+  @media (max-width:640px) { select { min-width:0; width:100%; } header > label { width:100%; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Claude Log Analyzer</h1>
+  <label>Project <select id="project"></select></label>
+  <label>Session <select id="session"></select></label>
+  <span class="spacer"></span>
+  <span class="badge" id="redact"></span>
+  <button id="reload" title="Re-read log files from disk">Reload logs</button>
+</header>
+<div id="err" hidden></div>
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = n => n == null ? "–" : Number(n).toLocaleString();
+const TABS = ["Overview", "Tools", "Large & repeated", "Trace", "Exposure"];
+let tab = "Overview", token = 0;
+
+async function api(path, params = {}) {
+  const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
+  const res = await fetch(`/api/${path}${q ? "?" + q : ""}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || data.error);
+  return data;
+}
+const scope = () => ({ project: $("#project").value, session: $("#session").value });
+const when = ts => ts ? ts.replace("T", " ").slice(0, 16) : "–";
+
+function showErr(e) { const el = $("#err"); el.hidden = !e; el.textContent = e ? "Error: " + e.message : ""; }
+
+async function loadProjects() {
+  const [projs, meta] = await Promise.all([api("projects"), api("meta")]);
+  $("#redact").textContent = meta.redact ? "redaction on" : "redaction OFF";
+  $("#project").innerHTML = `<option value="">All projects (${projs.length})</option>` +
+    projs.map(p => `<option value="${esc(p.project)}">${esc(p.project.replace(/^-home-[^-]+-?/, "~/").replace(/-/g, "/"))} (${p.sessions})</option>`).join("");
+  await loadSessions();
+}
+async function loadSessions() {
+  const s = await api("sessions", { project: $("#project").value });
+  $("#session").innerHTML = `<option value="">All sessions (${s.length})</option>` +
+    s.map(x => `<option value="${esc(x.session_id)}">${esc(when(x.last_ts))} · ${esc(x.title || x.session_id.slice(0, 8))}</option>`).join("");
+  await render();
+}
+
+function cards(items) {
+  return `<div class="cards">${items.map(([k, v]) => `<div class="card"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join("")}</div>`;
+}
+function table(cols, rows, empty = "Nothing to show.") {
+  if (!rows.length) return `<p class="muted">${empty}</p>`;
+  return `<table><tr>${cols.map(c => `<th class="${c.n ? "n" : ""}">${esc(c.h)}</th>`).join("")}</tr>` +
+    rows.map(r => `<tr>${cols.map(c => `<td class="${c.n ? "n" : ""} ${c.t ? "t" : ""}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join("")}</tr>`).join("") + "</table>";
+}
+function lineChart(points, key, label) {
+  if (points.length < 2) return `<p class="muted">Not enough turns to chart.</p>`;
+  const W = 900, H = 200, L = 52, B = 22, T = 8;
+  const ys = points.map(p => p[key] || 0), max = Math.max(...ys, 1);
+  const x = i => L + (W - L - 8) * i / (points.length - 1), y = v => T + (H - T - B) * (1 - v / max);
+  const d = ys.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(label)}">
+    <line x1="${L}" y1="${y(0)}" x2="${W - 8}" y2="${y(0)}" stroke="var(--line)"/>
+    <line x1="${L}" y1="${y(max)}" x2="${W - 8}" y2="${y(max)}" stroke="var(--line)" stroke-dasharray="3 3"/>
+    <text x="${L - 6}" y="${y(max) + 4}" text-anchor="end">${fmt(max)}</text><text x="${L - 6}" y="${y(0)}" text-anchor="end">0</text>
+    <text x="${L}" y="${H - 6}">turn 1</text><text x="${W - 8}" y="${H - 6}" text-anchor="end">turn ${points.length}</text>
+    <path d="${d}" fill="none" stroke="var(--bar)" stroke-width="2"/></svg>`;
+}
+
+const views = {
+  async Overview() {
+    const [o, ins, ctx] = await Promise.all([api("overview", scope()), api("insights", scope()), api("context", scope())]);
+    const cs = o.cost_state_tokens;
+    return cards([
+      ["assistant messages", fmt(o.assistant_messages)], ["tool calls", fmt(o.tool_calls)],
+      ["output tokens (logged)", fmt(o.output_tokens)], ["context re-read from cache", fmt(o.cache_read)],
+      ["cache hit ratio", o.cache_hit_ratio == null ? "–" : Math.round(o.cache_hit_ratio * 100) + "%"],
+      [`cost-state total (${o.cost_state_sessions ?? 0} session(s))`, o.cost_state_usd == null ? "–" : "$" + o.cost_state_usd.toFixed(2)],
+    ]) + `<div class="panel"><h2>What stands out</h2>${ins.length ? ins.map(i =>
+      `<div class="insight ${esc(i.severity)}"><b>${esc(i.title)}</b><small>${esc(i.detail)}</small>${i.action ? `<small class="act">→ ${esc(i.action)}</small>` : ""}</div>`).join("") : '<p class="muted">No findings.</p>'}</div>`
+    + `<div class="panel"><h2>Context size per turn (input + cache tokens)</h2>${lineChart(ctx, "context", "Context size per turn")}
+       <div class="caveat">Logged usage is a lower bound on billed usage${cs ? `. For the ${o.cost_state_sessions} session(s) with a cost-state record: ${fmt(cs.outputTokens)} output tokens reported vs ${fmt(o.logged_output_in_costed)} logged` : ""}.</div></div>`;
+  },
+  async Tools() {
+    const t = await api("tools", scope()), max = Math.max(...t.map(x => x.est_tokens), 1);
+    return `<div class="panel"><h2>Tool usage and result size</h2>` + table([
+      { h: "Tool", k: "tool" }, { h: "Calls", k: "calls", n: 1, f: r => fmt(r.calls) }, { h: "Errors", n: 1, f: r => fmt(r.errors) },
+      { h: "Result chars", n: 1, f: r => fmt(r.result_chars) }, { h: "Est. tokens*", n: 1, f: r => fmt(r.est_tokens) },
+      { h: "Largest result", n: 1, f: r => fmt(r.max_chars) },
+      { h: "", f: r => `<div class="bar" style="width:${Math.max(1, 160 * r.est_tokens / max)}px"></div>` },
+    ], t) + `<div class="caveat">* Estimated as characters ÷ 4. Per-result token counts are not logged.</div></div>`;
+  },
+  async "Large & repeated"() {
+    const [top, rep] = await Promise.all([api("top", scope()), api("repeats", scope())]);
+    return `<div class="panel"><h2>Largest tool results</h2>` + table([
+      { h: "Tool", k: "tool" }, { h: "Target", k: "target", t: 1 }, { h: "Chars", n: 1, f: r => fmt(r.result_chars) },
+      { h: "Est. tokens*", n: 1, f: r => fmt(r.est_tokens) }, { h: "Next-turn context Δ*", n: 1, f: r => fmt(r.next_ctx_delta) },
+    ], top) + `</div><div class="panel"><h2>Repeated identical calls</h2>` + table([
+      { h: "Tool", k: "tool" }, { h: "Target", k: "target", t: 1 }, { h: "Times", n: 1, f: r => fmt(r.times) },
+      { h: "Re-fetched tokens*", n: 1, f: r => fmt(r.wasted_est_tokens) },
+    ], rep, "No repeated calls found.") + `<div class="caveat">* Estimates. Context Δ is the change in context size on the next turn, which also includes the model's own output.</div></div>`;
+  },
+  async Trace() {
+    const t = await api("trace", scope());
+    return `<div class="panel"><h2>Step-by-step trace${t.length >= 400 ? " (first 400 records)" : ""}</h2>` + table([
+      { h: "Time", f: r => esc(when(r.timestamp)) }, { h: "Who", f: r => `<span class="tag ${esc(r.type)}">${esc(r.type)}${r.is_sidechain ? " ⤷sub" : ""}</span>` },
+      { h: "Blocks", k: "block_types" }, { h: "Preview", k: "preview", t: 1 },
+    ], t, "Select a project or session.") + `</div>`;
+  },
+  async Exposure() {
+    const e = await api("exposure", scope());
+    return `<div class="panel"><h2>Sensitive-looking paths touched</h2>` + table([
+      { h: "Tool", k: "tool" }, { h: "Target", k: "target", t: 1 }, { h: "Times", n: 1, f: r => fmt(r.times) },
+    ], e.flagged, "No paths matched the sensitive-name patterns.") + `</div><div class="panel"><h2>Files read (${fmt(e.files_read.length)})</h2>` + table([
+      { h: "Path", k: "target", t: 1 }, { h: "Times", n: 1, f: r => fmt(r.times) }, { h: "Sessions", n: 1, f: r => fmt(r.sessions) },
+    ], e.files_read) + `<div class="caveat">Path-based only: tool output is not scanned. ${esc(e.caveat || "")}</div></div>`;
+  },
+};
+
+async function render() {
+  const my = ++token;
+  $("#tabs").innerHTML = TABS.map(t => `<button class="${t === tab ? "on" : ""}" data-t="${esc(t)}">${esc(t)}</button>`).join("");
+  try {
+    const html = await views[tab]();
+    if (my === token) { $("#view").innerHTML = html; showErr(null); }
+  } catch (e) { if (my === token) showErr(e); }
+}
+
+$("#tabs").addEventListener("click", e => { const t = e.target.dataset.t; if (t) { tab = t; render(); } });
+$("#project").addEventListener("change", loadSessions);
+$("#session").addEventListener("change", render);
+$("#reload").addEventListener("click", async () => { await api("reload"); await loadProjects(); });
+loadProjects().catch(showErr);
+</script>
+</body>
+</html>

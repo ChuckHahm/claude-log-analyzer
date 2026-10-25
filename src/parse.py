@@ -33,6 +33,7 @@ class ParseResult:
     usage: pd.DataFrame
     cost_state: pd.DataFrame
     stats: dict = field(default_factory=dict)
+    sessions: pd.DataFrame = field(default_factory=pd.DataFrame)
 
     def summary(self) -> str:
         s = self.stats
@@ -91,6 +92,35 @@ def result_size(content) -> tuple[int, int]:
     return chars, images
 
 
+PREVIEW_CHARS = 200
+
+
+def tool_target(name: str | None, inp) -> str | None:
+    """Short description of what a tool call acts on (path, command, pattern)."""
+    if not isinstance(inp, dict):
+        return None
+    for key in ("file_path", "path", "notebook_path", "command", "pattern", "url", "query", "skill"):
+        v = inp.get(key)
+        if isinstance(v, str):
+            return v[:PREVIEW_CHARS]
+    return None
+
+
+def preview_of(rtype: str, content: list[dict]) -> str:
+    """One-line, truncated description of a record. Never the full content."""
+    for b in content:
+        t = b.get("type")
+        if t == "text" and isinstance(b.get("text"), str):
+            return b["text"].strip().replace("\n", " ")[:PREVIEW_CHARS]
+        if t == "tool_use":
+            return f"{canonical_tool(b.get('name'))}: {tool_target(b.get('name'), b.get('input')) or ''}"[:PREVIEW_CHARS]
+        if t == "tool_result":
+            return "(tool result)"
+        if t == "thinking":
+            return "(thinking)"
+    return rtype
+
+
 def _tur_chars(tur, key: str) -> int | None:
     return len(tur[key]) if isinstance(tur, dict) and isinstance(tur.get(key), str) else None
 
@@ -100,7 +130,7 @@ def parse_files(paths: list[Path], root: Path | None = None) -> ParseResult:
     msgs, usage_rows, uses, results, costs = [], [], {}, {}, []
     seen_msg_ids: set[str] = set()
     stats = {"files": 0, "records": 0, "skipped_lines": 0, "unknown_types": Counter()}
-    sessions, timestamps = set(), []
+    sessions, timestamps, titles = set(), [], {}
 
     for path in paths:
         stats["files"] += 1
@@ -122,6 +152,8 @@ def parse_files(paths: list[Path], root: Path | None = None) -> ParseResult:
             if ts:
                 timestamps.append(ts)
 
+            if rtype == "ai-title" and rec.get("aiTitle"):
+                titles[session] = rec["aiTitle"]
             if rtype == "cost-state":
                 costs.append({"session_id": session, "project": project,
                               "total_cost_usd": rec.get("totalCostUSD"),
@@ -139,6 +171,7 @@ def parse_files(paths: list[Path], root: Path | None = None) -> ParseResult:
                 "is_sidechain": bool(rec.get("isSidechain")), "session_id": session,
                 "project": project, "version": rec.get("version"), "message_id": msg_id,
                 "block_types": ",".join(sorted({b.get("type", "?") for b in content})),
+                "preview": preview_of(rtype, content),
             })
 
             if rtype == "assistant":
@@ -157,6 +190,7 @@ def parse_files(paths: list[Path], root: Path | None = None) -> ParseResult:
                         uses[b["id"]] = {
                             "tool_use_id": b["id"], "tool_raw": b.get("name"),
                             "tool": canonical_tool(b.get("name")), "input": b.get("input"),
+                            "target": tool_target(b.get("name"), b.get("input")),
                             "session_id": session, "project": project, "message_id": msg_id,
                             "timestamp": ts, "is_sidechain": bool(rec.get("isSidechain")),
                         }
@@ -183,7 +217,14 @@ def parse_files(paths: list[Path], root: Path | None = None) -> ParseResult:
 
     stats.update(sessions=len(sessions), unknown_types=stats["unknown_types"],
                  first_ts=min(timestamps, default=None), last_ts=max(timestamps, default=None))
-    return ParseResult(pd.DataFrame(msgs), tool_calls, pd.DataFrame(usage_rows), pd.DataFrame(costs), stats)
+    messages = pd.DataFrame(msgs)
+    sess = pd.DataFrame()
+    if not messages.empty:
+        sess = (messages.groupby(["project", "session_id"])
+                .agg(first_ts=("timestamp", "min"), last_ts=("timestamp", "max"),
+                     records=("uuid", "size"), version=("version", "last")).reset_index())
+        sess["title"] = sess.session_id.map(titles)
+    return ParseResult(messages, tool_calls, pd.DataFrame(usage_rows), pd.DataFrame(costs), stats, sess)
 
 
 def parse_dir(root: Path | None = None) -> ParseResult:

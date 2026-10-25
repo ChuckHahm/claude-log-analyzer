@@ -5,3 +5,4 @@ config/patterns.yaml
 __pycache__/
 .venv/
 *.egg-info/
+.gstack/
