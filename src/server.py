@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import analysis
+import analyze_tokens
 import parse
 
 STATIC = Path(__file__).parent / "static"
@@ -70,6 +71,8 @@ def make_handler(state: State):
                     self._json(analysis.overview(r, project, session))
                 elif u.path == "/api/insights":
                     self._json(analysis.insights(r, project, session))
+                elif u.path == "/api/recommendations":
+                    self._json(analyze_tokens.build(r, project, session, **r_kw())["recommendations"])
                 elif u.path == "/api/context":
                     self._json(analysis.context_series(r, project, session))
                 elif u.path == "/api/tools":

@@ -120,7 +120,7 @@ function lineChart(points, key, label) {
 
 const views = {
   async Overview() {
-    const [o, ins, ctx] = await Promise.all([api("overview", scope()), api("insights", scope()), api("context", scope())]);
+    const [o, ins, ctx, recs] = await Promise.all([api("overview", scope()), api("insights", scope()), api("context", scope()), api("recommendations", scope())]);
     const cs = o.cost_state_tokens;
     return cards([
       ["assistant messages", fmt(o.assistant_messages)], ["tool calls", fmt(o.tool_calls)],
@@ -129,6 +129,9 @@ const views = {
       [`cost-state total (${o.cost_state_sessions ?? 0} session(s))`, o.cost_state_usd == null ? "–" : "$" + o.cost_state_usd.toFixed(2)],
     ]) + `<div class="panel"><h2>What stands out</h2>${ins.length ? ins.map(i =>
       `<div class="insight ${esc(i.severity)}"><b>${esc(i.title)}</b><small>${esc(i.detail)}</small>${i.action ? `<small class="act">→ ${esc(i.action)}</small>` : ""}</div>`).join("") : '<p class="muted">No findings.</p>'}</div>`
+    + `<div class="panel"><h2>Recommended changes (ranked by estimated tokens saved)</h2>${recs.length ? recs.map((r, i) =>
+      `<div class="insight ${i < 3 ? "warn" : "info"}"><b>${i + 1}. ${esc(r.title)} — ~${fmt(r.est_tokens_saved)} tokens</b>${r.evidence.map(e => `<small>${esc(e)}</small>`).join("")}<small>Basis: ${esc(r.basis)}</small><small class="act">→ ${esc(r.action)}</small></div>`).join("") : '<p class="muted">No optimization candidates found.</p>'}
+       <div class="caveat">Estimates. Tokens differ in price: cache reads are much cheaper than cache writes, so compare within a category.</div></div>`
     + `<div class="panel"><h2>Context size per turn (input + cache tokens)</h2>${lineChart(ctx, "context", "Context size per turn")}
        <div class="caveat">Logged usage is a lower bound on billed usage${cs ? `. For the ${o.cost_state_sessions} session(s) with a cost-state record: ${fmt(cs.outputTokens)} output tokens reported vs ${fmt(o.logged_output_in_costed)} logged` : ""}.</div></div>`;
   },
@@ -145,11 +148,12 @@ const views = {
     const [top, rep] = await Promise.all([api("top", scope()), api("repeats", scope())]);
     return `<div class="panel"><h2>Largest tool results</h2>` + table([
       { h: "Tool", k: "tool" }, { h: "Target", k: "target", t: 1 }, { h: "Chars", n: 1, f: r => fmt(r.result_chars) },
-      { h: "Est. tokens*", n: 1, f: r => fmt(r.est_tokens) }, { h: "Next-turn context Δ*", n: 1, f: r => fmt(r.next_ctx_delta) },
+      { h: "Est. tokens*", n: 1, f: r => fmt(r.est_tokens) }, { h: "Next-turn context Δ*", n: 1, f: r => fmt(Math.round(r.next_ctx_delta)) },
+      { h: "Turns carried", n: 1, f: r => fmt(r.remaining_turns) }, { h: "Carried tokens*", n: 1, f: r => fmt(r.carried_tokens) },
     ], top) + `</div><div class="panel"><h2>Repeated identical calls</h2>` + table([
       { h: "Tool", k: "tool" }, { h: "Target", k: "target", t: 1 }, { h: "Times", n: 1, f: r => fmt(r.times) },
       { h: "Re-fetched tokens*", n: 1, f: r => fmt(r.wasted_est_tokens) },
-    ], rep, "No repeated calls found.") + `<div class="caveat">* Estimates. Context Δ is the change in context size on the next turn, which also includes the model's own output.</div></div>`;
+    ], rep, "No repeated calls found.") + `<div class="caveat">* Estimates. Context Δ is the next turn's context growth minus the model's own output. Carried tokens = estimated tokens × turns the result stays in context.</div></div>`;
   },
   async Trace() {
     const t = await api("trace", scope());

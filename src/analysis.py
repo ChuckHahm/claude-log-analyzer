@@ -9,6 +9,7 @@ import re
 
 import pandas as pd
 
+from attribute import attribute
 from parse import USAGE_COLS, ParseResult
 
 CHARS_PER_TOKEN = 4
@@ -67,32 +68,6 @@ def _scope(r: ParseResult, project: str | None, session: str | None):
     return f(r.messages), f(r.tool_calls), f(r.usage), f(r.cost_state)
 
 
-def attribute(calls: pd.DataFrame, usage: pd.DataFrame) -> pd.DataFrame:
-    """Add est_tokens and next-turn context delta (estimate) to each tool call."""
-    if calls.empty:
-        return calls
-    c = calls.copy()
-    c["result_chars"] = c.get("result_chars", pd.Series(0, index=c.index)).fillna(0).astype(int)
-    c["est_tokens"] = (c.result_chars / CHARS_PER_TOKEN).round().astype(int)
-    c["next_ctx_delta"] = pd.NA
-    if not usage.empty:
-        for sid, grp in c.groupby("session_id"):
-            u = usage[usage.session_id == sid].sort_values("timestamp")
-            if u.empty:
-                continue
-            ctx = _ctx(u).to_numpy()
-            ts = u.timestamp.to_numpy()
-            ids = list(u.message_id)
-            for i, row in grp.iterrows():
-                if row.message_id not in ids or not isinstance(row.get("result_timestamp"), str):
-                    continue
-                k = ids.index(row.message_id)
-                nxt = next((j for j in range(k + 1, len(ids)) if ts[j] >= row.result_timestamp), None)
-                if nxt is not None:
-                    c.at[i, "next_ctx_delta"] = int(ctx[nxt] - ctx[k])
-    return c
-
-
 def overview(r: ParseResult, project=None, session=None) -> dict:
     msgs, calls, usage, costs = _scope(r, project, session)
     out = {"records": len(msgs), "tool_calls": len(calls), "assistant_messages": len(usage)}
@@ -148,7 +123,7 @@ def top_results(r: ParseResult, project=None, session=None, n=20, do_redact=True
     c = attribute(calls, usage).sort_values("result_chars", ascending=False).head(n)
     c["target"] = c.target.map(redact) if do_redact else c.target
     return _clean(c[["session_id", "timestamp", "tool", "target", "result_chars", "est_tokens",
-                     "next_ctx_delta", "is_error"]])
+                     "next_ctx_delta", "remaining_turns", "carried_tokens", "is_error"]])
 
 
 def repeated_calls(r: ParseResult, project=None, session=None, do_redact=True) -> list[dict]:

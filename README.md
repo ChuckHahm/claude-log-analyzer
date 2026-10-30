@@ -16,6 +16,13 @@ sudo apt install jq   # ad-hoc log inspection
 pytest
 ```
 
+## Token report (M2)
+```bash
+python src/analyze_tokens.py                    # writes reports/token-report-<date>.md
+python src/analyze_tokens.py --project -home-chuck-claude-BrianMedical
+```
+Ranked recommendations with evidence, largest results, redundant calls, context growth, cache efficiency, and cost/usage by project, tool and model. Per-result token figures are estimates (chars ÷ 4); "carried tokens" = estimate × turns the result stays in context.
+
 ## Viewer
 ```bash
 python src/server.py            # http://127.0.0.1:8765
@@ -28,4 +35,4 @@ Binds to 127.0.0.1 only. Secrets in targets and previews are redacted unless `--
 Logs contain file contents and command output. Process locally, never commit real logs, and keep redaction on in reports.
 
 ## Status
-M0 (schema discovery), M1 (parser: `src/parse.py`) and a first-cut viewer (`src/server.py`, `src/analysis.py`) are done. Run `python src/parse.py` to write tables to `data/`. M2 (token attribution) is next.
+M0 (schema), M1 (parser) and M2 (token attribution: `src/attribute.py`, `src/analyze_tokens.py`) are done, plus a first-cut viewer. M3 (harness inspection) is next. Run `python src/parse.py` to write tables to `data/`. M2 (token attribution) is next.

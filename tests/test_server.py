@@ -41,7 +41,7 @@ def test_overview_dedupes_usage(base):
 
 
 def test_every_endpoint_responds(base):
-    for ep in ("meta", "insights", "context", "tools", "top", "repeats", "trace", "exposure"):
+    for ep in ("meta", "insights", "recommendations", "context", "tools", "top", "repeats", "trace", "exposure"):
         get(base, f"/api/{ep}?project=-home-test-proj&session=fix-1")  # a 500 raises HTTPError
 
 
